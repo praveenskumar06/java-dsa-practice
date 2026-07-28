@@ -10,6 +10,7 @@ public class FibonacciDP {
 
         for (int i = 2; i <= n; i++) {
             dp[i] = dp[i - 1] + dp[i - 2];
+            System.out.println("dp[" + i + "] = " + dp[i]); // Debugging statement to show the computed Fibonacci number at each step
         }
 
         return dp[n];

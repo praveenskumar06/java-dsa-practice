@@ -7,12 +7,15 @@ public class BFS {
         graph.put(0, Arrays.asList(1, 2));
         graph.put(1, Arrays.asList(0, 3));
         graph.put(2, Arrays.asList(0, 3));
-        graph.put(3, Arrays.asList(1, 2));
+        graph.put(3, Arrays.asList(1, 2, 4));
+        graph.put(4, Arrays.asList(3, 5));
+        graph.put(5, Arrays.asList(4));
+
 
         Set<Integer> visited = new HashSet<>();
         Queue<Integer> queue = new LinkedList<>();
 
-        int start = 0;
+        int start = 0;      
         visited.add(start);
         queue.add(start);
 
