@@ -66,6 +66,24 @@ public class DeviceLifecycleManagerTest {
         testDueForMaintenance_ExactlyAtThreshold_Excluded();
         testDueForMaintenance_EmptyWhenNoneOverdue();
 
+        // ---- PHASE 6: Implement batchAddDevices ----
+        System.out.println("\n━━━ PHASE 6: Implement — batchAddDevices() ━━━");
+        testBatchAdd_Atomic_Success();
+        testBatchAdd_Atomic_OneFails_NoDevicesAdded();
+        testBatchAdd_Atomic_DuplicateWithinBatch_ShouldFail();
+        testBatchAdd_NonAtomic_PartialSuccess();
+        testBatchAdd_NonAtomic_AllFail_ReturnsFalse();
+        testBatchAdd_NullOrEmptyList_ReturnsFalse();
+
+        // ---- PHASE 7: Implement getTopNDevicesByLowestBattery ----
+        System.out.println("\n━━━ PHASE 7: Implement — getTopNDevicesByLowestBattery() ━━━");
+        testLowestBattery_SortedAscending();
+        testLowestBattery_TieBreakingByRegisteredDay();
+        testLowestBattery_LimitApplied();
+        testLowestBattery_ExcludesTerminalStatuses();
+        testLowestBattery_ExcludesNegativeRegisteredDay();
+        testLowestBattery_InvalidTypeOrNonPositiveN_ReturnsEmpty();
+
         // ---- Summary ----
         System.out.println("\n══════════════════════════════════════════════════");
         System.out.println("  RESULTS:  " + passed + " passed,  " + failed + " failed,  " + (passed + failed) + " total");
@@ -398,6 +416,157 @@ public class DeviceLifecycleManagerTest {
 
         List<String> result = mgr.getDevicesDueForMaintenance(10, 4);
         assertEqual("Empty list when no devices exceed threshold", 0, result.size());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  PHASE 6 TESTS — batchAddDevices
+    // ═══════════════════════════════════════════════════════════════════
+
+    static void testBatchAdd_Atomic_Success() {
+        DeviceLifecycleManager mgr = new DeviceLifecycleManager(new HashMap<>());
+        List<Device> batch = List.of(
+            new Device("B-1", "SENSOR", 1, 0, 80, "REGISTERED"),
+            new Device("B-2", "CAMERA", 2, 0, 90, "ACTIVE"),
+            new Device("B-3", "THERMOSTAT", 3, 0, 75, "PENDING")
+        );
+
+        boolean result = mgr.batchAddDevices(batch, true);
+        assertEqual("batchAddDevices (atomic=true, all valid) should return true", true, result);
+        assertEqual("All 3 devices should be present in map", 3, mgr.getDevices().size());
+    }
+
+    static void testBatchAdd_Atomic_OneFails_NoDevicesAdded() {
+        Map<String, Device> devices = new HashMap<>();
+        devices.put("EXISTING-1", new Device("EXISTING-1", "SENSOR", 1, 0, 80, "ACTIVE"));
+        DeviceLifecycleManager mgr = new DeviceLifecycleManager(devices);
+
+        List<Device> batch = List.of(
+            new Device("B-1", "SENSOR", 1, 0, 80, "ACTIVE"),
+            new Device("B-2", "CAMERA", 2, 0, 90, "INVALID_STATUS"), // Bad status
+            new Device("B-3", "THERMOSTAT", 3, 0, 75, "ACTIVE")
+        );
+
+        boolean result = mgr.batchAddDevices(batch, true);
+        assertEqual("batchAddDevices (atomic=true, 1 invalid) should return false", false, result);
+        assertEqual("Map should only retain original device (rollback/no add)", 1, mgr.getDevices().size());
+        assertEqual("B-1 should not be in map", false, mgr.getDevices().containsKey("B-1"));
+    }
+
+    static void testBatchAdd_Atomic_DuplicateWithinBatch_ShouldFail() {
+        DeviceLifecycleManager mgr = new DeviceLifecycleManager(new HashMap<>());
+        List<Device> batch = List.of(
+            new Device("DUP-1", "SENSOR", 1, 0, 80, "ACTIVE"),
+            new Device("DUP-1", "CAMERA", 2, 0, 90, "ACTIVE") // Duplicate within batch
+        );
+
+        boolean result = mgr.batchAddDevices(batch, true);
+        assertEqual("batchAddDevices (atomic=true, dup in batch) should return false", false, result);
+        assertEqual("Map should remain empty", 0, mgr.getDevices().size());
+    }
+
+    static void testBatchAdd_NonAtomic_PartialSuccess() {
+        DeviceLifecycleManager mgr = new DeviceLifecycleManager(new HashMap<>());
+        List<Device> batch = List.of(
+            new Device("OK-1", "SENSOR", 1, 0, 80, "ACTIVE"),
+            new Device("BAD-1", "SENSOR", -5, 0, 80, "ACTIVE"), // Negative day
+            new Device("OK-2", "CAMERA", 2, 0, 90, "ACTIVE")
+        );
+
+        boolean result = mgr.batchAddDevices(batch, false);
+        assertEqual("batchAddDevices (atomic=false, partial valid) should return true", true, result);
+        assertEqual("Map should have exactly 2 valid devices", 2, mgr.getDevices().size());
+        assertEqual("OK-1 must be present", true, mgr.getDevices().containsKey("OK-1"));
+        assertEqual("OK-2 must be present", true, mgr.getDevices().containsKey("OK-2"));
+        assertEqual("BAD-1 must NOT be present", false, mgr.getDevices().containsKey("BAD-1"));
+    }
+
+    static void testBatchAdd_NonAtomic_AllFail_ReturnsFalse() {
+        DeviceLifecycleManager mgr = new DeviceLifecycleManager(new HashMap<>());
+        List<Device> batch = List.of(
+            new Device("BAD-1", "SENSOR", -1, 0, 80, "ACTIVE"),
+            new Device("BAD-2", "UNKNOWN_TYPE", 1, 0, 80, "ACTIVE")
+        );
+
+        boolean result = mgr.batchAddDevices(batch, false);
+        assertEqual("batchAddDevices (atomic=false, all fail) should return false", false, result);
+        assertEqual("Map should be empty", 0, mgr.getDevices().size());
+    }
+
+    static void testBatchAdd_NullOrEmptyList_ReturnsFalse() {
+        DeviceLifecycleManager mgr = new DeviceLifecycleManager(new HashMap<>());
+        assertEqual("Null batch should return false", false, mgr.batchAddDevices(null, true));
+        assertEqual("Empty batch should return false", false, mgr.batchAddDevices(Collections.emptyList(), true));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  PHASE 7 TESTS — getTopNDevicesByLowestBattery
+    // ═══════════════════════════════════════════════════════════════════
+
+    static void testLowestBattery_SortedAscending() {
+        Map<String, Device> devices = new HashMap<>();
+        devices.put("D-1", new Device("D-1", "SENSOR", 5, 0, 80, "ACTIVE"));
+        devices.put("D-2", new Device("D-2", "SENSOR", 3, 0, 20, "ACTIVE"));
+        devices.put("D-3", new Device("D-3", "SENSOR", 2, 0, 45, "ACTIVE"));
+        DeviceLifecycleManager mgr = new DeviceLifecycleManager(devices);
+
+        List<String> result = mgr.getTopNDevicesByLowestBattery("SENSOR", 3);
+        // Expect lowest battery first: D-2 (20), D-3 (45), D-1 (80)
+        assertEqual("Should return 3 devices sorted lowest battery first", List.of("D-2", "D-3", "D-1"), result);
+    }
+
+    static void testLowestBattery_TieBreakingByRegisteredDay() {
+        Map<String, Device> devices = new HashMap<>();
+        // Both have battery = 15%, but D-OLD was registered on day 1, D-NEW on day 10
+        devices.put("D-NEW", new Device("D-NEW", "CAMERA", 10, 0, 15, "ACTIVE"));
+        devices.put("D-OLD", new Device("D-OLD", "CAMERA", 1, 0, 15, "ACTIVE"));
+        DeviceLifecycleManager mgr = new DeviceLifecycleManager(devices);
+
+        List<String> result = mgr.getTopNDevicesByLowestBattery("CAMERA", 2);
+        // Tie broken by registeredDay ASCENDING: D-OLD (day 1) before D-NEW (day 10)
+        assertEqual("Tie broken by registeredDay ascending", List.of("D-OLD", "D-NEW"), result);
+    }
+
+    static void testLowestBattery_LimitApplied() {
+        Map<String, Device> devices = new HashMap<>();
+        devices.put("D-1", new Device("D-1", "THERMOSTAT", 1, 0, 10, "ACTIVE"));
+        devices.put("D-2", new Device("D-2", "THERMOSTAT", 2, 0, 25, "ACTIVE"));
+        devices.put("D-3", new Device("D-3", "THERMOSTAT", 3, 0, 40, "ACTIVE"));
+        devices.put("D-4", new Device("D-4", "THERMOSTAT", 4, 0, 60, "ACTIVE"));
+        DeviceLifecycleManager mgr = new DeviceLifecycleManager(devices);
+
+        List<String> result = mgr.getTopNDevicesByLowestBattery("THERMOSTAT", 2);
+        assertEqual("Limit n=2 should only return the 2 lowest", List.of("D-1", "D-2"), result);
+    }
+
+    static void testLowestBattery_ExcludesTerminalStatuses() {
+        Map<String, Device> devices = new HashMap<>();
+        // D-RET has lowest battery (5%), but is RETIRED -> exclude!
+        devices.put("D-RET", new Device("D-RET", "SENSOR", 1, 0, 5, "RETIRED"));
+        // D-MAINT has 8%, but is MAINTENANCE -> exclude!
+        devices.put("D-MAINT", new Device("D-MAINT", "SENSOR", 1, 0, 8, "MAINTENANCE"));
+        // D-ACT has 30%, ACTIVE -> include
+        devices.put("D-ACT", new Device("D-ACT", "SENSOR", 1, 0, 30, "ACTIVE"));
+        DeviceLifecycleManager mgr = new DeviceLifecycleManager(devices);
+
+        List<String> result = mgr.getTopNDevicesByLowestBattery("SENSOR", 5);
+        assertEqual("Should exclude RETIRED and MAINTENANCE devices", List.of("D-ACT"), result);
+    }
+
+    static void testLowestBattery_ExcludesNegativeRegisteredDay() {
+        Map<String, Device> devices = new HashMap<>();
+        devices.put("D-BAD", new Device("D-BAD", "GATEWAY", -1, 0, 5, "ACTIVE"));
+        devices.put("D-GOOD", new Device("D-GOOD", "GATEWAY", 1, 0, 50, "ACTIVE"));
+        DeviceLifecycleManager mgr = new DeviceLifecycleManager(devices);
+
+        List<String> result = mgr.getTopNDevicesByLowestBattery("GATEWAY", 2);
+        assertEqual("Should exclude devices with registeredDay < 0", List.of("D-GOOD"), result);
+    }
+
+    static void testLowestBattery_InvalidTypeOrNonPositiveN_ReturnsEmpty() {
+        DeviceLifecycleManager mgr = new DeviceLifecycleManager(new HashMap<>());
+        assertEqual("Invalid type should return empty list", Collections.emptyList(), mgr.getTopNDevicesByLowestBattery("INVALID_TYPE", 5));
+        assertEqual("n <= 0 should return empty list", Collections.emptyList(), mgr.getTopNDevicesByLowestBattery("SENSOR", 0));
+        assertEqual("Negative n should return empty list", Collections.emptyList(), mgr.getTopNDevicesByLowestBattery("SENSOR", -3));
     }
 
     // ═══════════════════════════════════════════════════════════════════

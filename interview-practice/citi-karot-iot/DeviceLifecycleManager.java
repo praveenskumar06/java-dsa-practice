@@ -103,6 +103,17 @@ public class DeviceLifecycleManager {
      * @return true if the device was added, false otherwise.
      */
     public boolean addDevice(Device device) {
+        if (!isValidDevice(device)) {
+            return false;
+        }
+        devices.put(device.getId(), device);
+        return true;
+    }
+
+    public boolean isValidDevice(Device device) {
+        if (device == null || device.getId() == null) {
+            return false;
+        }
         if (devices.keySet().contains(device.getId())) {
             return false;
         }
@@ -115,7 +126,6 @@ public class DeviceLifecycleManager {
         if (!VALID_TYPES.contains(device.getType())) {
             return false;
         }
-        devices.put(device.getId(), device);
         return true;
     }
 
@@ -197,6 +207,105 @@ public class DeviceLifecycleManager {
                 .sorted(Comparator.comparingInt(Device::getMaintenanceDay)).map(d -> d.getId())
                 .collect(Collectors.toList());
         return asdf;
+    }
+
+    // ========================================================================
+    // PHASE 6 — IMPLEMENT THIS METHOD
+    // ========================================================================
+
+    /**
+     * Batch registers new devices into the system.
+     *
+     * Conditions:
+     * - If newDevices is null or empty, return false.
+     * - Every device must meet standard addDevice validation:
+     * * Device must not be null
+     * * Device ID must not be in devices map
+     * * Device ID must not be duplicated within newDevices itself
+     * * Device status must be in VALID_STATUSES
+     * * Device registeredDay >= 0
+     * * Device type must be in VALID_TYPES
+     *
+     * - If atomic == true:
+     * * If ANY device fails validation, NONE are added. State is unchanged. Return
+     * false.
+     * * If ALL pass, all are added. Return true.
+     *
+     * - If atomic == false:
+     * * Add all devices that pass validation; skip invalid ones.
+     * * Return true if AT LEAST ONE device was added; false if 0 were added.
+     *
+     * @param newDevices list of devices to add
+     * @param atomic     whether the operation is all-or-nothing
+     * @return true if successful according to the atomic mode, false otherwise
+     */
+    public boolean batchAddDevices(List<Device> newDevices, boolean atomic) {
+
+        if (newDevices == null || newDevices.isEmpty()) {
+            return false;
+        }
+
+        if (atomic) {
+            Map<String, Device> staged = new HashMap<>();
+            for (Device d : newDevices) {
+                if (isValidDevice(d) && !staged.keySet().contains(d.getId())) {
+                    staged.put(d.getId(), d);
+                } else {
+                    return false;
+                }
+            }
+            devices.putAll(staged);
+            return true;
+        } else {
+            int addCount = 0;
+            for (Device d : newDevices) {
+                if (isValidDevice(d)) {
+                    devices.put(d.getId(), d);
+                    addCount++;
+                }
+            }
+            return addCount > 0;
+        }
+
+    }
+
+    // ========================================================================
+    // PHASE 7 — IMPLEMENT THIS METHOD
+    // ========================================================================
+
+    /**
+     * Returns the top N device IDs of a given type with the lowest battery levels.
+     *
+     * Filtering:
+     * 1. type must be in VALID_TYPES, and n > 0 (otherwise return empty list)
+     * 2. Device type must match requested type
+     * 3. Device must be active (status is a KEY in VALID_STATUS_TRANSITIONS)
+     * 4. Device registeredDay >= 0
+     *
+     * Sorting & Limiting:
+     * 1. Sort by batteryLevel ASCENDING (lowest battery first)
+     * 2. Tie-breaker: if battery levels are equal, sort by registeredDay ASCENDING
+     * 3. Return at most n device IDs
+     *
+     * @param type device type to inspect
+     * @param n    maximum number of device IDs to return
+     * @return list of up to n device IDs meeting criteria
+     */
+    public List<String> getTopNDevicesByLowestBattery(String type, int n) {
+
+        if (n <= 0 || !VALID_TYPES.contains(type))
+            return Collections.emptyList();
+
+        List<String> deviceList = devices.values().stream()
+                .filter(d -> d.getRegisteredDay() >= 0 && type.equals(d.getType())
+                        && VALID_STATUS_TRANSITIONS.containsKey(d.getStatus()))
+                .sorted(Comparator.comparingInt(Device::getBatteryLevel)
+                        .thenComparingInt(Device::getRegisteredDay))
+                .limit(n)
+                .map(Device::getId)
+                .collect(Collectors.toList());
+
+        return deviceList;
     }
 
     // ---- Accessor ----

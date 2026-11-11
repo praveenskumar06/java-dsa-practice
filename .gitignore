@@ -1,0 +1,28 @@
+# Compiled Java class files
+*.class
+
+# Node / Angular dependencies & build artifacts
+node_modules/
+/.angular/
+dist/
+out-tsc/
+bazel-out/
+tmp/
+
+# Package manager logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDEs & Editor configurations
+.idea/
+.vscode/
+*.swp
+*.iml
+.project
+.classpath
+.settings/
+
+# OS metadata files
+.DS_Store
+Thumbs.db

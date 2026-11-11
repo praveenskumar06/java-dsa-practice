@@ -1,0 +1,168 @@
+<div class="dashboard-container">
+  <!-- Header -->
+  <header class="header">
+    <div class="header-title">
+      <h1>IoT Device Live Monitor</h1>
+      <span class="badge-tag">Angular 17 • Signals & Modern Control Flow</span>
+    </div>
+    <button class="btn btn-secondary" (click)="resetDevices()">Reset Data</button>
+  </header>
+
+  <!-- Metric Summary Cards (Computed Signals in Action) -->
+  <div class="metrics-grid">
+    <div class="metric-card">
+      <span class="metric-label">Total Devices</span>
+      <span class="metric-value">{{ devices().length }}</span>
+    </div>
+
+    <div class="metric-card active-card">
+      <span class="metric-label">Active Online</span>
+      <span class="metric-value">{{ activeCount() }}</span>
+    </div>
+
+    <div class="metric-card warning-card">
+      <span class="metric-label">Critical Battery (< 20%)</span>
+      <span class="metric-value">{{ lowBatteryCount() }}</span>
+    </div>
+
+    <div class="metric-card">
+      <span class="metric-label">Showing in View</span>
+      <span class="metric-value">{{ filteredDevices().length }}</span>
+    </div>
+  </div>
+
+  <!-- Critical Battery Alert Banner using @if -->
+  @if (lowBatteryCount() > 0) {
+    <div class="alert-banner">
+      <span class="alert-icon">⚠️</span>
+      <div>
+        <strong>Attention Required:</strong> You have <strong>{{ lowBatteryCount() }}</strong> active device(s) critically low on battery. Service immediately.
+      </div>
+    </div>
+  } @else {
+    <div class="info-banner">
+      <span>✅ All active devices have healthy battery levels.</span>
+    </div>
+  }
+
+  <!-- Filter & Search Toolbar -->
+  <div class="toolbar">
+    <div class="search-box">
+      <input
+        type="text"
+        placeholder="Search by Device Name or ID..."
+        [value]="searchTerm()"
+        (input)="onSearchChange($any($event.target).value)"
+      />
+    </div>
+
+    <div class="filter-tabs">
+      <button
+        [class.active]="selectedFilter() === 'ALL'"
+        (click)="setFilter('ALL')">All</button>
+      <button
+        [class.active]="selectedFilter() === 'ACTIVE'"
+        (click)="setFilter('ACTIVE')">Active</button>
+      <button
+        [class.active]="selectedFilter() === 'MAINTENANCE'"
+        (click)="setFilter('MAINTENANCE')">Maintenance</button>
+      <button
+        [class.active]="selectedFilter() === 'PENDING'"
+        (click)="setFilter('PENDING')">Pending</button>
+      <button
+        [class.active]="selectedFilter() === 'RETIRED'"
+        (click)="setFilter('RETIRED')">Retired</button>
+    </div>
+  </div>
+
+  <!-- Devices Table using Angular 17 @for and @empty -->
+  <div class="table-card">
+    <table class="device-table">
+      <thead>
+        <tr>
+          <th>Device ID</th>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Status</th>
+          <th>Battery</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (device of filteredDevices(); track device.id) {
+          <tr>
+            <td class="font-mono"><strong>{{ device.id }}</strong></td>
+            <td>{{ device.name }}</td>
+            <td><span class="type-pill">{{ device.type }}</span></td>
+            <td>
+              <!-- Modern @switch for Status Badges -->
+              @switch (device.status) {
+                @case ('ACTIVE') {
+                  <span class="status-badge status-active">ACTIVE</span>
+                }
+                @case ('MAINTENANCE') {
+                  <span class="status-badge status-maint">MAINTENANCE</span>
+                }
+                @case ('PENDING') {
+                  <span class="status-badge status-pending">PENDING</span>
+                }
+                @case ('RETIRED') {
+                  <span class="status-badge status-retired">RETIRED</span>
+                }
+                @default {
+                  <span class="status-badge">{{ device.status }}</span>
+                }
+              }
+            </td>
+            <td>
+              <div class="battery-wrapper">
+                <div class="battery-bar">
+                  <div
+                    class="battery-fill"
+                    [style.width.%]="device.batteryLevel"
+                    [class.battery-critical]="device.batteryLevel < 20"
+                    [class.battery-medium]="device.batteryLevel >= 20 && device.batteryLevel < 50"
+                    [class.battery-healthy]="device.batteryLevel >= 50"
+                  ></div>
+                </div>
+                <span class="battery-text" [class.text-danger]="device.batteryLevel < 20">
+                  {{ device.batteryLevel }}%
+                </span>
+              </div>
+            </td>
+            <td class="actions-cell">
+              @if (device.status !== 'RETIRED') {
+                <button
+                  class="btn btn-sm btn-outline"
+                  (click)="toggleMaintenance(device.id)"
+                >
+                  {{ device.status === 'ACTIVE' ? 'Send to Maintenance' : 'Activate' }}
+                </button>
+                <button
+                  class="btn btn-sm btn-danger-outline"
+                  (click)="retireDevice(device.id)"
+                >
+                  Retire
+                </button>
+              } @else {
+                <span class="text-muted">No Actions Available</span>
+              }
+            </td>
+          </tr>
+        } @empty {
+          <!-- Angular 17 @empty block automatically displays when the list has 0 items! -->
+          <tr>
+            <td colspan="6" class="empty-state">
+              <div class="empty-content">
+                <span class="empty-icon">🔍</span>
+                <p>No devices found matching your current filter & search criteria.</p>
+                <button class="btn btn-sm btn-secondary" (click)="resetDevices()">Reset Filters</button>
+              </div>
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+</div>
+
