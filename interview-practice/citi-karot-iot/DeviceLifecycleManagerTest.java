@@ -84,6 +84,23 @@ public class DeviceLifecycleManagerTest {
         testLowestBattery_ExcludesNegativeRegisteredDay();
         testLowestBattery_InvalidTypeOrNonPositiveN_ReturnsEmpty();
 
+        // ---- PHASE 8: Implement replaceDevice ----
+        System.out.println("\n━━━ PHASE 8: Implement — replaceDevice() ━━━");
+        testReplaceDevice_Success();
+        testReplaceDevice_NonExistentOldDevice_Fails();
+        testReplaceDevice_OldDeviceAlreadyRetired_Fails();
+        testReplaceDevice_OldDeviceInMaintenance_Fails();
+        testReplaceDevice_InvalidNewDevice_Rollback_OldRemainsActive();
+        testReplaceDevice_NewDeviceHasDuplicateId_Fails();
+
+        // ---- PHASE 9: Implement getFleetHealthReport (Option B) ----
+        System.out.println("\n━━━ PHASE 9: Implement — getFleetHealthReport() ━━━");
+        testFleetHealthReport_Comprehensive();
+        testFleetHealthReport_TypeWithNoActiveDevices();
+        testFleetHealthReport_ExcludesNegativeRegisteredDayFromActive();
+        testFleetHealthReport_EmptyDevices();
+        testFleetHealthReport_InvalidNegativeParameters();
+
         // ---- Summary ----
         System.out.println("\n══════════════════════════════════════════════════");
         System.out.println("  RESULTS:  " + passed + " passed,  " + failed + " failed,  " + (passed + failed) + " total");
@@ -567,6 +584,169 @@ public class DeviceLifecycleManagerTest {
         assertEqual("Invalid type should return empty list", Collections.emptyList(), mgr.getTopNDevicesByLowestBattery("INVALID_TYPE", 5));
         assertEqual("n <= 0 should return empty list", Collections.emptyList(), mgr.getTopNDevicesByLowestBattery("SENSOR", 0));
         assertEqual("Negative n should return empty list", Collections.emptyList(), mgr.getTopNDevicesByLowestBattery("SENSOR", -3));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  PHASE 8 TESTS — replaceDevice
+    // ═══════════════════════════════════════════════════════════════════
+
+    static void testReplaceDevice_Success() {
+        Map<String, Device> devices = new HashMap<>();
+        devices.put("OLD-1", new Device("OLD-1", "SENSOR", 1, 0, 50, "ACTIVE"));
+        DeviceLifecycleManager mgr = new DeviceLifecycleManager(devices);
+
+        Device replacement = new Device("NEW-1", "SENSOR", 10, 10, 100, "ACTIVE");
+        boolean result = mgr.replaceDevice("OLD-1", replacement);
+
+        assertEqual("replaceDevice should return true on success", true, result);
+        assertEqual("Old device status must now be RETIRED", "RETIRED", mgr.getDevices().get("OLD-1").getStatus());
+        assertEqual("New device must now exist in devices map", true, mgr.getDevices().containsKey("NEW-1"));
+        Device newDev = mgr.getDevices().get("NEW-1");
+        assertEqual("New device status must be ACTIVE", "ACTIVE", newDev != null ? newDev.getStatus() : null);
+        assertEqual("Total devices in map should now be 2", 2, mgr.getDevices().size());
+    }
+
+    static void testReplaceDevice_NonExistentOldDevice_Fails() {
+        DeviceLifecycleManager mgr = new DeviceLifecycleManager(new HashMap<>());
+        Device replacement = new Device("NEW-1", "SENSOR", 10, 10, 100, "ACTIVE");
+
+        boolean result = mgr.replaceDevice("NON-EXISTENT", replacement);
+        assertEqual("Replacing non-existent device should return false", false, result);
+        assertEqual("New device must NOT be added to map", false, mgr.getDevices().containsKey("NEW-1"));
+    }
+
+    static void testReplaceDevice_OldDeviceAlreadyRetired_Fails() {
+        Map<String, Device> devices = new HashMap<>();
+        devices.put("OLD-RET", new Device("OLD-RET", "SENSOR", 1, 0, 0, "RETIRED"));
+        DeviceLifecycleManager mgr = new DeviceLifecycleManager(devices);
+
+        Device replacement = new Device("NEW-1", "SENSOR", 10, 10, 100, "ACTIVE");
+        boolean result = mgr.replaceDevice("OLD-RET", replacement);
+
+        assertEqual("Replacing already RETIRED device should return false", false, result);
+        assertEqual("Old device must remain RETIRED", "RETIRED", mgr.getDevices().get("OLD-RET").getStatus());
+        assertEqual("New device must NOT be added", false, mgr.getDevices().containsKey("NEW-1"));
+    }
+
+    static void testReplaceDevice_OldDeviceInMaintenance_Fails() {
+        Map<String, Device> devices = new HashMap<>();
+        devices.put("OLD-MNT", new Device("OLD-MNT", "CAMERA", 1, 0, 30, "MAINTENANCE"));
+        DeviceLifecycleManager mgr = new DeviceLifecycleManager(devices);
+
+        Device replacement = new Device("NEW-1", "CAMERA", 10, 10, 100, "ACTIVE");
+        boolean result = mgr.replaceDevice("OLD-MNT", replacement);
+
+        assertEqual("Replacing device in MAINTENANCE should return false", false, result);
+        assertEqual("Old device must remain in MAINTENANCE", "MAINTENANCE", mgr.getDevices().get("OLD-MNT").getStatus());
+        assertEqual("New device must NOT be added", false, mgr.getDevices().containsKey("NEW-1"));
+    }
+
+    static void testReplaceDevice_InvalidNewDevice_Rollback_OldRemainsActive() {
+        Map<String, Device> devices = new HashMap<>();
+        devices.put("OLD-ACT", new Device("OLD-ACT", "THERMOSTAT", 5, 2, 70, "ACTIVE"));
+        DeviceLifecycleManager mgr = new DeviceLifecycleManager(devices);
+
+        // Replacement has invalid negative registeredDay (-1)
+        Device invalidReplacement = new Device("NEW-INVALID", "THERMOSTAT", -1, 0, 100, "ACTIVE");
+        boolean result = mgr.replaceDevice("OLD-ACT", invalidReplacement);
+
+        assertEqual("replaceDevice with invalid replacement must return false", false, result);
+        assertEqual("ATOMIC ROLLBACK: Old device must still be ACTIVE", "ACTIVE", mgr.getDevices().get("OLD-ACT").getStatus());
+        assertEqual("Invalid replacement must NOT be added", false, mgr.getDevices().containsKey("NEW-INVALID"));
+    }
+
+    static void testReplaceDevice_NewDeviceHasDuplicateId_Fails() {
+        Map<String, Device> devices = new HashMap<>();
+        devices.put("OLD-1", new Device("OLD-1", "GATEWAY", 1, 0, 80, "ACTIVE"));
+        devices.put("EXISTING-2", new Device("EXISTING-2", "GATEWAY", 2, 0, 90, "ACTIVE"));
+        DeviceLifecycleManager mgr = new DeviceLifecycleManager(devices);
+
+        // Replacement tries to reuse existing ID "EXISTING-2"
+        Device duplicateReplacement = new Device("EXISTING-2", "GATEWAY", 10, 10, 100, "ACTIVE");
+        boolean result = mgr.replaceDevice("OLD-1", duplicateReplacement);
+
+        assertEqual("replaceDevice with duplicate new ID must return false", false, result);
+        assertEqual("Old device must remain ACTIVE", "ACTIVE", mgr.getDevices().get("OLD-1").getStatus());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  PHASE 9 TESTS — getFleetHealthReport (Option B)
+    // ═══════════════════════════════════════════════════════════════════
+
+    static void testFleetHealthReport_Comprehensive() {
+        Map<String, Device> devices = new HashMap<>();
+        // SENSORS:
+        // D-1: ACTIVE, battery 80, maintenanceDay 2 (currentDay 10 - 2 = 8 > threshold 5 -> overdue)
+        devices.put("D-1", new Device("D-1", "SENSOR", 1, 2, 80, "ACTIVE"));
+        // D-2: ACTIVE, battery 60, maintenanceDay 7 (currentDay 10 - 7 = 3 <= threshold 5 -> not overdue)
+        devices.put("D-2", new Device("D-2", "SENSOR", 2, 7, 60, "ACTIVE"));
+        // D-3: RETIRED, battery 10, maintenanceDay 0 (excluded from active, avg battery, and overdue)
+        devices.put("D-3", new Device("D-3", "SENSOR", 3, 0, 10, "RETIRED"));
+
+        // CAMERA:
+        // D-4: ACTIVE, battery 90, maintenanceDay 8 (diff 2 <= 5 -> not overdue)
+        devices.put("D-4", new Device("D-4", "CAMERA", 1, 8, 90, "ACTIVE"));
+
+        DeviceLifecycleManager mgr = new DeviceLifecycleManager(devices);
+        Map<String, FleetStats> report = mgr.getFleetHealthReport(10, 5);
+
+        assertEqual("Report should contain 2 device types", 2, report.size());
+
+        FleetStats sensorStats = report.get("SENSOR");
+        assertEqual("SENSOR totalCount should be 3", 3, sensorStats != null ? sensorStats.getTotalCount() : null);
+        assertEqual("SENSOR activeCount should be 2", 2, sensorStats != null ? sensorStats.getActiveCount() : null);
+        assertEqual("SENSOR averageBattery should be 70.0", Double.valueOf(70.0), sensorStats != null ? sensorStats.getAverageBattery() : null);
+        assertEqual("SENSOR overdueCount should be 1", 1, sensorStats != null ? sensorStats.getOverdueCount() : null);
+
+        FleetStats cameraStats = report.get("CAMERA");
+        assertEqual("CAMERA totalCount should be 1", 1, cameraStats != null ? cameraStats.getTotalCount() : null);
+        assertEqual("CAMERA activeCount should be 1", 1, cameraStats != null ? cameraStats.getActiveCount() : null);
+        assertEqual("CAMERA averageBattery should be 90.0", Double.valueOf(90.0), cameraStats != null ? cameraStats.getAverageBattery() : null);
+        assertEqual("CAMERA overdueCount should be 0", 0, cameraStats != null ? cameraStats.getOverdueCount() : null);
+    }
+
+    static void testFleetHealthReport_TypeWithNoActiveDevices() {
+        Map<String, Device> devices = new HashMap<>();
+        devices.put("D-1", new Device("D-1", "THERMOSTAT", 1, 0, 0, "RETIRED"));
+        devices.put("D-2", new Device("D-2", "THERMOSTAT", 2, 0, 0, "MAINTENANCE"));
+        DeviceLifecycleManager mgr = new DeviceLifecycleManager(devices);
+
+        Map<String, FleetStats> report = mgr.getFleetHealthReport(10, 5);
+        FleetStats stats = report.get("THERMOSTAT");
+
+        assertEqual("THERMOSTAT totalCount should be 2", 2, stats != null ? stats.getTotalCount() : null);
+        assertEqual("THERMOSTAT activeCount should be 0", 0, stats != null ? stats.getActiveCount() : null);
+        assertEqual("THERMOSTAT averageBattery should be 0.0 when 0 active", Double.valueOf(0.0), stats != null ? stats.getAverageBattery() : null);
+        assertEqual("THERMOSTAT overdueCount should be 0", 0, stats != null ? stats.getOverdueCount() : null);
+    }
+
+    static void testFleetHealthReport_ExcludesNegativeRegisteredDayFromActive() {
+        Map<String, Device> devices = new HashMap<>();
+        // D-1 has registeredDay = -1 -> invalid, must NOT be counted as active
+        devices.put("D-1", new Device("D-1", "GATEWAY", -1, 0, 80, "ACTIVE"));
+        DeviceLifecycleManager mgr = new DeviceLifecycleManager(devices);
+
+        Map<String, FleetStats> report = mgr.getFleetHealthReport(10, 5);
+        FleetStats stats = report.get("GATEWAY");
+
+        assertEqual("GATEWAY totalCount should be 1", 1, stats != null ? stats.getTotalCount() : null);
+        assertEqual("GATEWAY activeCount should be 0 (registeredDay < 0 excluded)", 0, stats != null ? stats.getActiveCount() : null);
+        assertEqual("GATEWAY averageBattery should be 0.0", Double.valueOf(0.0), stats != null ? stats.getAverageBattery() : null);
+    }
+
+    static void testFleetHealthReport_EmptyDevices() {
+        DeviceLifecycleManager mgr = new DeviceLifecycleManager(new HashMap<>());
+        Map<String, FleetStats> report = mgr.getFleetHealthReport(10, 5);
+        assertEqual("Empty devices should return empty report", true, report.isEmpty());
+    }
+
+    static void testFleetHealthReport_InvalidNegativeParameters() {
+        Map<String, Device> devices = new HashMap<>();
+        devices.put("D-1", new Device("D-1", "SENSOR", 1, 0, 80, "ACTIVE"));
+        DeviceLifecycleManager mgr = new DeviceLifecycleManager(devices);
+
+        assertEqual("Negative currentDay should return empty map", true, mgr.getFleetHealthReport(-1, 5).isEmpty());
+        assertEqual("Negative threshold should return empty map", true, mgr.getFleetHealthReport(10, -1).isEmpty());
     }
 
     // ═══════════════════════════════════════════════════════════════════

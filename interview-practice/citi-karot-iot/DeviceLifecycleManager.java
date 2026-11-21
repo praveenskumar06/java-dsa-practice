@@ -308,6 +308,114 @@ public class DeviceLifecycleManager {
         return deviceList;
     }
 
+    // ========================================================================
+    // PHASE 8 — IMPLEMENT THIS METHOD
+    // ========================================================================
+
+    /**
+     * Replaces an existing device with a new device atomically.
+     *
+     * Validation rules (return false if ANY condition fails):
+     * 1. oldDeviceId must not be null and must exist in the devices map.
+     * 2. The old device must be active (its status must be a KEY in
+     * VALID_STATUS_TRANSITIONS).
+     * 3. newDevice must pass all standard validation rules:
+     * - newDevice != null
+     * - newDevice ID must not be null
+     * - newDevice ID must not already exist in the devices map (and cannot equal
+     * oldDeviceId)
+     * - newDevice status must be in VALID_STATUSES
+     * - newDevice registeredDay >= 0
+     * - newDevice type must be in VALID_TYPES
+     *
+     * Atomic Operation:
+     * - If all validations pass:
+     * 1. Transition the old device's status to "RETIRED".
+     * 2. Add the new device into the devices map.
+     * 3. Return true.
+     * - If ANY validation fails:
+     * - The old device must NOT be retired (state must remain completely
+     * unchanged).
+     * - The new device must NOT be added.
+     * - Return false.
+     *
+     * @param oldDeviceId ID of the device to be replaced
+     * @param newDevice   the replacement device to register
+     * @return true if replacement succeeded atomically, false otherwise
+     */
+    public boolean replaceDevice(String oldDeviceId, Device newDevice) {
+        // TODO: Implement Phase 8
+        if (oldDeviceId == null || newDevice == null) {
+            return false;
+        }
+        if (!devices.containsKey(oldDeviceId) || devices.containsKey(newDevice.getId()) || !isValidDevice(newDevice)) {
+            return false;
+        }
+        if (!VALID_STATUS_TRANSITIONS.containsKey(devices.get(oldDeviceId).getStatus())
+                || !devices.get(oldDeviceId).getStatus().equals("ACTIVE")) {
+            return false;
+        }
+
+        devices.get(oldDeviceId).setStatus("RETIRED");
+        devices.put(newDevice.getId(), newDevice);
+
+        return true;
+    }
+
+    // ========================================================================
+    // PHASE 9 (OPTION B) — IMPLEMENT THIS METHOD
+    // ========================================================================
+
+    /**
+     * Generates a consolidated fleet health report grouped by Device Type.
+     *
+     * Rules:
+     * - Group by Device::getType for all devices present in the devices map.
+     * - For each device type present, calculate:
+     * 1. totalCount: total number of devices of this type.
+     * 2. activeCount: count of devices that are active:
+     * - registeredDay >= 0
+     * - status is a key in VALID_STATUS_TRANSITIONS (REGISTERED, PENDING, ACTIVE)
+     * 3. averageBattery: arithmetic average of batteryLevel across active devices
+     * of this type.
+     * - If activeCount == 0, averageBattery must be 0.0.
+     * 4. overdueCount: count of active devices of this type where:
+     * - (currentDay - maintenanceDay) > maintenanceThreshold
+     *
+     * - If currentDay < 0 or maintenanceThreshold < 0, or if devices is empty,
+     * return an empty map.
+     *
+     * @param currentDay           the current system day
+     * @param maintenanceThreshold maximum days allowed between maintenance
+     * @return Map of DeviceType -> FleetStats
+     */
+    public Map<String, FleetStats> getFleetHealthReport(int currentDay, int maintenanceThreshold) {
+        // TODO: Implement Phase 9 (Option B)
+
+        if (currentDay < 0 || maintenanceThreshold < 0 || devices.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<String, List<Device>> typeMap = devices.values().stream().collect(Collectors.groupingBy(Device::getType));
+        Map<String, FleetStats> fleetStatsMap = new HashMap<>();
+
+        typeMap.forEach((key, deviceList) -> {
+            int totalCount = deviceList.size();
+            List<Device> filteredDevice = deviceList.stream()
+                    .filter(d -> d.getRegisteredDay() >= 0 && VALID_STATUS_TRANSITIONS.containsKey(d.getStatus()))
+                    .toList();
+            int activeCount = filteredDevice.size();
+            double averageBattery = filteredDevice.stream().mapToInt(Device::getBatteryLevel).average().orElse(0.0);
+
+            int overDueCount = (int) filteredDevice.stream()
+                    .filter(f -> currentDay - f.getMaintenanceDay() > maintenanceThreshold).count();
+            FleetStats fleetStat = new FleetStats(totalCount, activeCount, averageBattery, overDueCount);
+
+            fleetStatsMap.put(key, fleetStat);
+
+        });
+        return fleetStatsMap;
+    }
+
     // ---- Accessor ----
 
     public Map<String, Device> getDevices() {
